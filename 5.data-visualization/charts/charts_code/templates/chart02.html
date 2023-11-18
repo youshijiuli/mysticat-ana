@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <script src="https://cdn.jsdelivr.net/npm/jquery@2.2.4/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <title>Document</title>
+</head>
+<body>
+     <!-- 为ECharts准备一个具备大小（宽高）的Dom -->
+     <div id="main" style="width: 1000px;height:600px;"></div>
+     <script type="text/javascript">
+         // 基于准备好的dom，初始化echarts实例
+         var myChart = echarts.init(document.getElementById('main'));
+
+        $(function(){
+            show_chart()
+        })
+        function show_chart(){
+            $.ajax({
+                type:'GET',
+                url:'http://127.0.0.1:5000/get_data',
+                dataType:'json',
+                success:function(rs){
+                    // console.log(rs)
+                    // 使用刚指定的配置项和数据显示图表。
+                    myChart.setOption(rs);
+                }
+            })
+        }
+     </script>
+</body>
+</html>
