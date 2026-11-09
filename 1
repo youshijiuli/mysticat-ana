@@ -1,0 +1,1418 @@
+# -*- coding: utf-8 -*-
+"""TaskFlow 待办清单 —— 单文件版 (由 make_single.py 自动生成, 勿手改)
+
+运行:  python TaskFlow.py
+依赖:  pip install PySide6==6.6.3.1
+功能与多文件版一致: 智能视图/清单/两级子任务/日历/时间线/热力图/统计/托盘提醒。
+
+单文件版说明
+结构：按依赖顺序拼接 11 个模块，每节用分隔线隔开，一眼能看清边界：
+# ------------------------------------------------------------ styles.py ------------------------------------------------------------
+# ------------------------------------------------------------ icons.py ------------------------------------------------------------
+# ------------------------------------------------------------ database.py ------------------------------------------------------------
+# ... calendar_widget / task_card / dialogs / calendar_view / timeline_view / stats_dialog / main_window / main.py
+技术要点
+- 每节通过模块注册机制加载，节内的 import database as db、from task_card import TaskCard 等语句原样保留，不是粗暴拼字符串
+- logo.png（3KB）转成 base64 内嵌，运行时自动释放到 %APPDATA%\TaskFlow\，单文件随处可跑
+- 依赖只有一行：pip install PySide6==6.6.3.1
+已验证：编译通过、临时目录实际运行 8 秒正常启动建库、11 个分节完整、入口正确。
+
+"""
+import base64
+import sys
+import types
+
+_LOGO_B64 = (
+    "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"
+    "iTLaxltmV48z/HiJMiROql+lCQ11KHfYXgAA"
+)
+
+
+def _section_module(name, source):
+    """把一个分节注册为真实模块, 使节内的 import styles as st 等语句原样可用"""
+    mod = types.ModuleType(name)
+    mod.__file__ = f"<TaskFlow:{name}>"
+    sys.modules[name] = mod
+    exec(compile(source, f"<TaskFlow:{name}>", "exec"), mod.__dict__)
+
+
+# ------------------------------------------------------------ styles.py ------------------------------------------------------------
+# -*- coding: utf-8 -*-
+"""TaskFlow 视觉主题：扁平简洁风，主色取自 logo 蓝色渐变"""
+
+# ---------- 色彩令牌 ----------
+PRIMARY       = "#2E7CF6"
+PRIMARY_HOVER = "#1E63D6"
+PRIMARY_SOFT  = "#EAF2FE"
+GRAD_FROM     = "#4FACFE"
+GRAD_TO       = "#2E7CF6"
+
+BG            = "#F4F6FB"
+CARD          = "#FFFFFF"
+SIDEBAR       = "#FFFFFF"
+
+TEXT          = "#1B2432"
+TEXT_SUB      = "#7A8699"
+TEXT_FAINT    = "#AAB4C4"
+BORDER        = "#E6EAF2"
+INPUT_BG      = "#F7F9FC"
+
+DANGER        = "#EF4444"
+WARNING       = "#F59E0B"
+SUCCESS       = "#22C55E"
+STAR          = "#F5B301"
+
+# 优先级色
+PRIO_COLORS   = {0: "#94A3B8", 1: "#3B82F6", 2: "#F59E0B", 3: "#EF4444"}
+
+
+def build_qss():
+    return f"""
+* {{
+    font-family: "Microsoft YaHei UI", "Segoe UI";
+    outline: none;
+}}
+QMainWindow, QWidget#rootBg {{ background: {BG}; }}
+QWidget#sidebar {{ background: {SIDEBAR}; border-right: 1px solid {BORDER}; }}
+QWidget#contentBg {{ background: {BG}; }}
+
+/* ---------- 侧边栏 ---------- */
+QLabel#brandName {{ color: {TEXT}; font-size: 17px; font-weight: 700; }}
+QLabel#brandSub  {{ color: {TEXT_FAINT}; font-size: 11px; }}
+QLabel#sectionLabel {{ color: {TEXT_FAINT}; font-size: 11px; font-weight: 600; padding: 2px 0; }}
+
+QPushButton#navBtn {{
+    color: {TEXT_SUB}; background: transparent; border: none; border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; text-align: left; font-weight: 500;
+}}
+QPushButton#navBtn:hover {{ background: {PRIMARY_SOFT}; color: {PRIMARY}; }}
+QPushButton#navBtn:checked {{ background: {PRIMARY_SOFT}; color: {PRIMARY}; font-weight: 600; }}
+
+QPushButton#listBtn {{
+    color: {TEXT}; background: transparent; border: none; border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; text-align: left;
+}}
+QPushButton#listBtn:hover {{ background: {PRIMARY_SOFT}; }}
+QPushButton#listBtn:checked {{ background: {PRIMARY_SOFT}; color: {PRIMARY}; font-weight: 600; }}
+
+QPushButton#iconBtn, QToolButton#iconBtn {{
+    color: {TEXT_SUB}; background: transparent; border: none;
+    border-radius: 6px; padding: 4px; font-size: 14px;
+}}
+QPushButton#iconBtn:hover, QToolButton#iconBtn:hover {{ background: {PRIMARY_SOFT}; color: {PRIMARY}; }}
+
+/* ---------- 顶栏 ---------- */
+QLabel#viewTitle {{ color: {TEXT}; font-size: 20px; font-weight: 700; }}
+QLabel#viewCount {{ color: {TEXT_FAINT}; font-size: 12px; }}
+
+QLineEdit#searchBox {{
+    background: {CARD}; color: {TEXT}; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 7px 12px; font-size: 13px;
+}}
+QLineEdit#searchBox:focus {{ border: 1px solid {PRIMARY}; background: #FFFFFF; }}
+
+QComboBox#sortBox {{
+    background: {CARD}; color: {TEXT_SUB}; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 6px 10px; font-size: 12px;
+}}
+QComboBox#sortBox::drop-down {{ border: none; width: 18px; }}
+QComboBox#sortBox QAbstractItemView {{
+    background: {CARD}; color: {TEXT}; border: 1px solid {BORDER};
+    selection-background-color: {PRIMARY_SOFT}; selection-color: {PRIMARY};
+}}
+
+/* 优先级下拉框 */
+QComboBox#prioBox {{
+    background: {CARD}; color: {TEXT}; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 6px 10px; font-size: 12px;
+}}
+QComboBox#prioBox:hover {{ border-color: {PRIMARY}; color: {PRIMARY}; }}
+QComboBox#prioBox::drop-down {{ border: none; width: 20px; }}
+QComboBox#prioBox::down-arrow {{
+    image: none; border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-top: 5px solid {TEXT_FAINT}; width: 0; height: 0; margin-right: 4px;
+}}
+QComboBox#prioBox::down-arrow:hover {{ border-top-color: {PRIMARY}; }}
+QComboBox#prioBox QAbstractItemView {{
+    background: {CARD}; color: {TEXT}; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 4px;
+    selection-background-color: {PRIMARY_SOFT}; selection-color: {PRIMARY};
+}}
+
+/* 通用下拉列表 / 提示气泡：避免系统默认黑色 */
+QComboBox QAbstractItemView {{
+    background: {CARD}; color: {TEXT}; border: 1px solid {BORDER};
+    selection-background-color: {PRIMARY_SOFT}; selection-color: {PRIMARY};
+}}
+QToolTip {{
+    color: {TEXT}; background: {CARD}; border: 1px solid {BORDER};
+    padding: 4px 8px; font-size: 12px; border-radius: 6px;
+}}
+
+QPushButton#chipBtn {{
+    color: {TEXT_SUB}; background: {CARD}; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 6px 12px; font-size: 12px;
+}}
+QPushButton#chipBtn:hover {{ border-color: {PRIMARY}; color: {PRIMARY}; }}
+QPushButton#chipBtn:checked {{ background: {PRIMARY_SOFT}; border-color: {PRIMARY}; color: {PRIMARY}; font-weight: 600; }}
+
+QLabel#switchLabel {{
+    color: {TEXT_SUB}; font-size: 12px; background: transparent;
+}}
+
+QToolButton#listMenuBtn {{
+    color: {TEXT_FAINT}; background: rgba(255,255,255,230);
+    border: 1px solid {BORDER}; border-radius: 10px; font-size: 11px;
+    padding: 0px;
+}}
+QToolButton#listMenuBtn:hover {{
+    color: {PRIMARY}; border-color: {PRIMARY}; background: {PRIMARY_SOFT};
+}}
+
+QFrame#heatCard {{
+    background: {CARD}; border: 1px solid {BORDER}; border-radius: 12px;
+}}
+QLabel#heatTitle {{
+    color: {TEXT}; font-size: 12.5px; font-weight: 600; background: transparent;
+}}
+QPushButton#heatToggle {{
+    color: {TEXT_SUB}; background: transparent; border: none;
+    font-size: 12px; border-radius: 5px;
+}}
+QPushButton#heatToggle:hover {{ background: {INPUT_BG}; color: {PRIMARY}; }}
+
+/* 视图切换分段按钮 */
+QPushButton#segBtn {{
+    color: {TEXT_SUB}; background: {CARD}; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 6px 16px; font-size: 12px; font-weight: 500;
+}}
+QPushButton#segBtn:hover {{ color: {PRIMARY}; }}
+QPushButton#segBtn:checked {{
+    color: #FFFFFF; background: {PRIMARY}; border-color: {PRIMARY}; font-weight: 600;
+}}
+QToolButton#dateBtn {{
+    color: {TEXT_SUB}; background: {CARD}; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 6px 12px; font-size: 12px;
+}}
+QToolButton#dateBtn:hover {{ border-color: {PRIMARY}; color: {PRIMARY}; }}
+QToolButton#dateBtn::menu-indicator {{ image: none; width: 0; }}
+
+/* 日历视图 */
+QFrame#calCell {{
+    background: {CARD}; border: 1px solid {BORDER}; border-radius: 8px;
+}}
+QFrame#calCell[in_month="false"] {{ background: #FAFBFD; }}
+QFrame#calCell:hover {{ border: 1px solid #C9D8F5; }}
+
+/* 日历选择弹窗 */
+QToolButton#navBtn2 {{
+    color: {TEXT_SUB}; background: transparent; border: 1px solid {BORDER};
+    border-radius: 6px; padding: 4px 10px; font-size: 11px;
+}}
+QToolButton#navBtn2:hover {{ color: {PRIMARY}; border-color: {PRIMARY}; }}
+QSpinBox {{
+    background: {CARD}; color: {TEXT}; border: 1px solid {BORDER};
+    border-radius: 6px; padding: 4px 6px; font-size: 12px; min-width: 52px;
+}}
+QSpinBox::up-button, QSpinBox::down-button {{ width: 14px; border: none; background: transparent; }}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ color: {PRIMARY}; }}
+QCheckBox {{ color: {TEXT}; font-size: 12px; spacing: 6px; background: transparent; }}
+QCheckBox::indicator {{
+    width: 16px; height: 16px; border: 1.5px solid #C6CEDB;
+    border-radius: 4px; background: {CARD};
+}}
+QCheckBox::indicator:hover {{ border-color: {PRIMARY}; }}
+QCheckBox::indicator:checked {{ background: {PRIMARY}; border-color: {PRIMARY}; }}
+
+/* ---------- 快速添加 ---------- */
+QFrame#quickAdd {{
+    background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px;
+}}
+QLineEdit#quickInput {{
+    background: transparent; color: {TEXT}; border: none;
+    padding: 10px 4px; font-size: 14px;
+}}
+QPushButton#addBtn {{
+    color: #FFFFFF; background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+        stop:0 {GRAD_FROM}, stop:1 {GRAD_TO});
+    border: none; border-radius: 8px; padding: 8px 18px;
+    font-size: 13px; font-weight: 600;
+}}
+QPushButton#addBtn:hover {{ background: {PRIMARY_HOVER}; }}
+
+/* ---------- 任务卡片 ---------- */
+QFrame#taskCard {{
+    background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px;
+}}
+QFrame#taskCard:hover {{ border: 1px solid #C9D8F5; }}
+QFrame#prioBar {{ border: none; border-radius: 1px; }}
+QLabel#taskTitle {{ color: {TEXT}; font-size: 14px; font-weight: 500; background: transparent; }}
+QLabel#taskTitle[done="true"] {{ color: {TEXT_FAINT}; font-weight: 400; }}
+QLabel#taskNotes {{ color: {TEXT_SUB}; font-size: 12px; background: transparent; }}
+QLabel#listTag {{ color: {TEXT_SUB}; font-size: 11px; background: {INPUT_BG};
+    border-radius: 4px; padding: 2px 8px; }}
+QLabel#dueChip {{ color: {TEXT_SUB}; font-size: 11px; font-weight: 600; background: {INPUT_BG};
+    border-radius: 4px; padding: 2px 8px; }}
+QLabel#dueChip[status="overdue"] {{ color: {DANGER}; background: #FEECEC; }}
+QLabel#dueChip[status="today"] {{ color: {WARNING}; background: #FEF5E5; }}
+QPushButton#starBtn {{ color: {TEXT_FAINT}; background: transparent; border: none; font-size: 15px; }}
+QPushButton#starBtn[starred="true"] {{ color: {STAR}; }}
+QPushButton#starBtn:hover {{ color: {STAR}; }}
+QPushButton#delBtn {{ color: {TEXT_FAINT}; background: transparent; border: none; font-size: 13px; }}
+QPushButton#delBtn:hover {{ color: {DANGER}; }}
+
+/* ---------- 空状态 / 底栏 ---------- */
+QLabel#emptyIcon {{ color: {TEXT_FAINT}; font-size: 40px; background: transparent; }}
+QLabel#emptyText {{ color: {TEXT_FAINT}; font-size: 13px; background: transparent; }}
+QProgressBar#progress {{ background: #E8EDF5; border: none; border-radius: 3px;
+    min-height: 6px; max-height: 6px; text-align: center; }}
+QProgressBar#progress::chunk {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+    stop:0 {GRAD_FROM}, stop:1 {GRAD_TO}); border-radius: 3px; }}
+QProgressBar#cardProgress {{ background: #E8EDF5; border: none; border-radius: 3px;
+    min-height: 6px; max-height: 6px; }}
+QProgressBar#cardProgress::chunk {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+    stop:0 {GRAD_FROM}, stop:1 {GRAD_TO}); border-radius: 3px; }}
+QLabel#statsText {{ color: {TEXT_SUB}; font-size: 12px; }}
+
+/* ---------- 滚动条 ---------- */
+QScrollArea {{ background: transparent; border: none; }}
+QWidget#listViewport, QWidget#listHost {{ background: #FFFFFF; }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: #D4DBE7; border-radius: 4px; min-height: 32px; }}
+QScrollBar::handle:vertical:hover {{ background: {PRIMARY}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+
+/* ---------- 对话框 ---------- */
+QDialog {{ background: {BG}; }}
+QLabel {{ color: {TEXT}; font-size: 13px; background: transparent; }}
+QLabel#dlgTitle {{ color: {TEXT}; font-size: 16px; font-weight: 700; }}
+QLineEdit, QPlainTextEdit, QDateEdit, QComboBox {{
+    background: {CARD}; color: {TEXT}; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 7px 10px; font-size: 13px;
+}}
+QLineEdit:focus, QPlainTextEdit:focus, QDateEdit:focus, QComboBox:focus {{ border: 1px solid {PRIMARY}; }}
+QPushButton#primaryBtn {{
+    color: #FFFFFF; background: {PRIMARY}; border: none;
+    border-radius: 8px; padding: 8px 22px; font-size: 13px; font-weight: 600;
+}}
+QPushButton#primaryBtn:hover {{ background: {PRIMARY_HOVER}; }}
+QPushButton#ghostBtn {{
+    color: {TEXT_SUB}; background: transparent; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 8px 18px; font-size: 13px;
+}}
+QPushButton#ghostBtn:hover {{ border-color: {PRIMARY}; color: {PRIMARY}; }}
+QPushButton#dangerBtn {{
+    color: {DANGER}; background: transparent; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 8px 18px; font-size: 13px;
+}}
+QPushButton#dangerBtn:hover {{ background: #FEECEC; border-color: {DANGER}; }}
+
+QMenu {{
+    color: {TEXT}; background: {CARD}; border: 1px solid {BORDER};
+    border-radius: 8px; padding: 6px;
+}}
+QMenu::item {{ color: {TEXT}; background: transparent; padding: 7px 26px; border-radius: 6px; }}
+QMenu::item:selected {{ background: {PRIMARY_SOFT}; color: {PRIMARY}; }}
+QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 8px; }}
+
+QCalendarWidget QWidget {{ alternate-background-color: {PRIMARY_SOFT}; }}
+QCalendarWidget QAbstractItemView:enabled {{ color: {TEXT}; selection-background-color: {PRIMARY}; selection-color: white; }}
+"""
+
+# ------------------------------------------------------------ icons.py ------------------------------------------------------------
+# -*- coding: utf-8 -*-
+"""几何绘制的扁平图标（避免 emoji 图标）"""
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+
+
+def _pixmap(size=40):
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    return pm
+
+
+def _painter(pm):
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    return p
+
+
+def _icon(pm):
+    return QIcon(pm)
+
+
+def inbox_icon(color="#7A8699", size=40):
+    pm = _pixmap(size); p = _painter(pm)
+    c = QColor(color); pen = QPen(c, 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    p.setPen(pen); p.setBrush(Qt.NoBrush)
+    r = QRectF(6, 6, 28, 28)
+    path = QPainterPath()
+    path.moveTo(10, 8); path.lineTo(30, 8); path.lineTo(34, 22); path.lineTo(34, 30)
+    path.quadTo(34, 32, 32, 32); path.lineTo(8, 32); path.quadTo(6, 32, 6, 30)
+    path.lineTo(6, 22); path.closeSubpath()
+    p.drawPath(path)
+    p.drawLine(QPointF(6, 22), QPointF(15, 22))
+    p.drawLine(QPointF(25, 22), QPointF(34, 22))
+    p.drawArc(QRectF(15, 17, 10, 10), 180 * 16, 180 * 16)
+    p.end(); return _icon(pm)
+
+
+def today_icon(color="#7A8699", size=40):
+    pm = _pixmap(size); p = _painter(pm)
+    c = QColor(color); pen = QPen(c, 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    p.setPen(pen); p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(7, 9, 26, 24), 4, 4)
+    p.drawLine(QPointF(7, 17), QPointF(33, 17))
+    p.drawLine(QPointF(14, 6), QPointF(14, 12))
+    p.drawLine(QPointF(26, 6), QPointF(26, 12))
+    p.setBrush(QBrush(c)); p.setPen(Qt.NoPen)
+    p.drawEllipse(QPointF(20, 24), 3.4, 3.4)
+    p.end(); return _icon(pm)
+
+
+def overdue_icon(color="#EF4444", size=40):
+    pm = _pixmap(size); p = _painter(pm)
+    c = QColor(color); pen = QPen(c, 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    p.setPen(pen); p.setBrush(Qt.NoBrush)
+    p.drawEllipse(QRectF(8, 8, 24, 24))
+    p.drawLine(QPointF(20, 14), QPointF(20, 22))
+    p.drawPoint(QPointF(20, 26))
+    p.end(); return _icon(pm)
+
+
+def star_icon(color="#7A8699", size=40, filled=False):
+    pm = _pixmap(size); p = _painter(pm)
+    c = QColor(color)
+    path = QPainterPath()
+    cx, cy, R, r = 20, 21, 12, 5.2
+    import math
+    for i in range(10):
+        ang = math.pi / 2 + i * math.pi / 5
+        rad = R if i % 2 == 0 else r
+        pt = QPointF(cx + rad * math.cos(ang), cy - rad * math.sin(ang))
+        if i == 0:
+            path.moveTo(pt)
+        else:
+            path.lineTo(pt)
+    path.closeSubpath()
+    p.setPen(QPen(c, 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setBrush(QBrush(c) if filled else Qt.NoBrush)
+    p.drawPath(path)
+    p.end(); return _icon(pm)
+
+
+def done_icon(color="#7A8699", size=40):
+    pm = _pixmap(size); p = _painter(pm)
+    c = QColor(color)
+    p.setPen(QPen(c, 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setBrush(Qt.NoBrush)
+    p.drawEllipse(QRectF(7, 7, 26, 26))
+    p.drawLine(QPointF(13, 21), QPointF(18, 26))
+    p.drawLine(QPointF(18, 26), QPointF(28, 14))
+    p.end(); return _icon(pm)
+
+
+def list_icon(color="#2E7CF6", size=40):
+    pm = _pixmap(size); p = _painter(pm)
+    c = QColor(color)
+    p.setBrush(QBrush(c)); p.setPen(Qt.NoPen)
+    for y in (12, 20, 28):
+        p.drawEllipse(QPointF(9, y), 2.4, 2.4)
+    pen = QPen(c, 3.0, Qt.SolidLine, Qt.RoundCap)
+    p.setPen(pen)
+    for y in (12, 20, 28):
+        p.drawLine(QPointF(16, y), QPointF(31, y))
+    p.end(); return _icon(pm)
+
+
+def plus_icon(color="#7A8699", size=40):
+    pm = _pixmap(size); p = _painter(pm)
+    p.setPen(QPen(QColor(color), 3.0, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(QPointF(20, 10), QPointF(20, 30))
+    p.drawLine(QPointF(10, 20), QPointF(30, 20))
+    p.end(); return _icon(pm)
+
+
+def trash_icon(color="#7A8699", size=40):
+    pm = _pixmap(size); p = _painter(pm)
+    c = QColor(color); pen = QPen(c, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    p.setPen(pen); p.setBrush(Qt.NoBrush)
+    p.drawLine(QPointF(9, 12), QPointF(31, 12))
+    p.drawLine(QPointF(16, 12), QPointF(16, 8))
+    p.drawLine(QPointF(24, 12), QPointF(24, 8))
+    p.drawRoundedRect(QRectF(11, 12, 18, 20), 3, 3)
+    p.drawLine(QPointF(17, 18), QPointF(17, 26))
+    p.drawLine(QPointF(23, 18), QPointF(23, 26))
+    p.end(); return _icon(pm)
+
+
+def edit_icon(color="#7A8699", size=40):
+    pm = _pixmap(size); p = _painter(pm)
+    c = QColor(color)
+    path = QPainterPath()
+    path.moveTo(28, 8); path.lineTo(32, 12); path.lineTo(18, 26); path.lineTo(13, 27)
+    path.lineTo(14, 22); path.closeSubpath()
+    p.setPen(QPen(c, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setBrush(Qt.NoBrush); p.drawPath(path)
+    p.drawLine(QPointF(10, 33), QPointF(30, 33))
+    p.end(); return _icon(pm)
+
+
+def folder_icon(color="#7A8699", size=40):
+    pm = _pixmap(size); p = _painter(pm)
+    c = QColor(color); pen = QPen(c, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    p.setPen(pen); p.setBrush(Qt.NoBrush)
+    path = QPainterPath()
+    path.moveTo(7, 12); path.quadTo(7, 9, 10, 9)
+    path.lineTo(16, 9); path.lineTo(19, 13); path.lineTo(30, 13)
+    path.quadTo(33, 13, 33, 16); path.lineTo(33, 27); path.quadTo(33, 30, 30, 30)
+    path.lineTo(10, 30); path.quadTo(7, 30, 7, 27); path.closeSubpath()
+    p.drawPath(path)
+    p.end(); return _icon(pm)
+
+
+def app_logo_icon(logo_path, size=64):
+    """从 logo.png 生成应用图标"""
+    icon = QIcon(logo_path)
+    if not icon.isNull():
+        return icon
+    return today_icon("#2E7CF6", size)
+
+# ------------------------------------------------------------ database.py ------------------------------------------------------------
+# -*- coding: utf-8 -*-
+"""SQLite3 数据层：清单 / 任务 / 设置"""
+import os
+import shutil
+import sqlite3
+from datetime import date, datetime, timedelta
+
+APP_NAME = "TaskFlow"
+
+
+def db_path():
+    base = os.getenv("APPDATA") or os.path.expanduser("~")
+    folder = os.path.join(base, APP_NAME)
+    os.makedirs(folder, exist_ok=True)
+    return os.path.join(folder, "todo.db")
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS lists (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS tasks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    list_id      INTEGER NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+    parent_id    INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+    title        TEXT NOT NULL,
+    notes        TEXT DEFAULT '',
+    priority     INTEGER DEFAULT 1,
+    due_date     TEXT,
+    starred      INTEGER DEFAULT 0,
+    completed    INTEGER DEFAULT 0,
+    completed_at TEXT,
+    sort_order   INTEGER DEFAULT 0,
+    created_at   TEXT DEFAULT (datetime('now','localtime')),
+    updated_at   TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+"""
+
+# 索引在 _migrate() 补列之后创建(旧库无 parent_id 列时先建索引会失败)
+POST_MIGRATE_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_tasks_list ON tasks(list_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed);
+CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
+"""
+
+PRIO_LOW, PRIO_MID, PRIO_HIGH, PRIO_URGENT = 0, 1, 2, 3
+PRIORITY_NAMES = {0: "低", 1: "中", 2: "高", 3: "紧急"}
+
+
+def now_str():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+class Database:
+    SCHEMA_VERSION = 1
+
+    def __init__(self):
+        self.conn = sqlite3.connect(db_path(), check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.execute("PRAGMA busy_timeout=3000")
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.DatabaseError:
+            pass
+        self.conn.executescript(SCHEMA)
+        self._migrate()
+        self.conn.executescript(POST_MIGRATE_INDEXES)
+        self.conn.execute(f"PRAGMA user_version={self.SCHEMA_VERSION}")
+        self.conn.commit()
+        self._ensure_default_list()
+
+    def _migrate(self):
+        """旧库升级: 补充子任务字段, 迁移前备份"""
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(tasks)")}
+        if "parent_id" not in cols or "sort_order" not in cols:
+            try:
+                shutil.copy2(db_path(), db_path() + ".bak-" +
+                             datetime.now().strftime("%Y%m%d%H%M%S"))
+            except OSError:
+                pass
+        if "parent_id" not in cols:
+            self.conn.execute(
+                "ALTER TABLE tasks ADD COLUMN parent_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE")
+        if "sort_order" not in cols:
+            self.conn.execute("ALTER TABLE tasks ADD COLUMN sort_order INTEGER DEFAULT 0")
+        # 旧库列可能无 DEFAULT, 补列后归一化 NULL 值
+        self.conn.execute("UPDATE tasks SET completed=0 WHERE completed IS NULL")
+        self.conn.execute("UPDATE tasks SET starred=0 WHERE starred IS NULL")
+        self.conn.execute("UPDATE tasks SET priority=1 WHERE priority IS NULL")
+        self.conn.execute("UPDATE tasks SET notes='' WHERE notes IS NULL")
+
+    def _ensure_default_list(self):
+        if not self.conn.execute("SELECT 1 FROM lists LIMIT 1").fetchone():
+            self.add_list("我的任务")
+
+    # ---------------- settings ----------------
+    def get_setting(self, key, default=None, type_=None):
+        row = self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        if row is None:
+            return default
+        value = row["value"]
+        if type_ is not None:
+            try:
+                return type_(value)
+            except (TypeError, ValueError):
+                return default
+        return value
+
+    def set_setting(self, key, value):
+        self.conn.execute(
+            "INSERT INTO settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
+        self.conn.commit()
+
+    # ---------------- lists ----------------
+    def get_lists(self):
+        rows = self.conn.execute(
+            "SELECT l.*, (SELECT COUNT(*) FROM tasks t WHERE t.list_id=l.id"
+            " AND t.completed=0 AND t.parent_id IS NULL) AS pending "
+            "FROM lists l ORDER BY l.sort_order, l.id").fetchall()
+        return [dict(r) for r in rows]
+
+    def add_list(self, name):
+        name = (name or "").strip()
+        if not name:
+            name = "未命名清单"
+        row = self.conn.execute("SELECT id FROM lists WHERE name=?", (name,)).fetchone()
+        if row:
+            return row["id"]
+        cur = self.conn.execute("INSERT INTO lists(name, sort_order) VALUES(?,?)",
+                                (name, self.conn.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM lists").fetchone()[0]))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def rename_list(self, list_id, name):
+        """重命名清单, 重名返回 False"""
+        name = (name or "").strip()
+        if not name:
+            return False
+        row = self.conn.execute(
+            "SELECT 1 FROM lists WHERE name=? AND id<>?", (name, list_id)).fetchone()
+        if row:
+            return False
+        self.conn.execute("UPDATE lists SET name=? WHERE id=?", (name, list_id))
+        self.conn.commit()
+        return True
+
+    def delete_list(self, list_id):
+        self.conn.execute("DELETE FROM lists WHERE id=?", (list_id,))
+        self.conn.commit()
+
+    # ---------------- tasks ----------------
+    def add_task(self, list_id, title, notes="", priority=PRIO_MID, due_date=None,
+                 parent_id=None):
+        if parent_id is not None:
+            parent = self.get_task(parent_id)
+            if not parent or parent["parent_id"]:
+                parent_id = None  # 仅支持两级
+            else:
+                list_id = parent["list_id"]
+        cur = self.conn.execute(
+            "INSERT INTO tasks(list_id,parent_id,title,notes,priority,due_date,sort_order,"
+            "completed,starred) VALUES(?,?,?,?,?,?,?,0,0)",
+            (list_id, parent_id, title.strip(), notes, priority, due_date,
+             self.conn.execute(
+                 "SELECT COALESCE(MAX(sort_order),0)+1 FROM tasks WHERE parent_id IS ?",
+                 (parent_id,)).fetchone()[0]))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def add_subtask(self, parent_id, title, **kwargs):
+        parent = self.get_task(parent_id)
+        # 已完成的父任务新增未完成子任务时, 自动重新打开父任务
+        if parent and parent["completed"]:
+            self.update_task(parent_id, completed=0, completed_at=None)
+        return self.add_task(None, title, parent_id=parent_id, **kwargs)
+
+    def get_subtasks(self, parent_id):
+        rows = self.conn.execute(
+            "SELECT * FROM tasks WHERE parent_id=? ORDER BY sort_order, id",
+            (parent_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_task(self, task_id, **fields):
+        if not fields:
+            return
+        fields["updated_at"] = now_str()
+        cols = ", ".join(f"{k}=?" for k in fields)
+        self.conn.execute(f"UPDATE tasks SET {cols} WHERE id=?", (*fields.values(), task_id))
+        self.conn.commit()
+
+    def toggle_complete(self, task_id, completed):
+        self.update_task(task_id, completed=int(completed),
+                         completed_at=now_str() if completed else None)
+        # 勾选联动: 父任务同步全部子任务
+        t = self.get_task(task_id)
+        if t and not t["parent_id"]:
+            self.conn.execute(
+                "UPDATE tasks SET completed=?, completed_at=?, updated_at=? WHERE parent_id=?",
+                (int(completed), now_str() if completed else None, now_str(), task_id))
+            self.conn.commit()
+            return
+        # 自动完成联动: 子任务全部完成时自动完成父任务
+        if t and t["parent_id"] and completed and self.get_setting("auto_complete", "1") == "1":
+            parent = self.get_task(t["parent_id"])
+            if parent and not parent["completed"]:
+                left = self.conn.execute(
+                    "SELECT COUNT(*) c FROM tasks WHERE parent_id=? AND completed=0",
+                    (t["parent_id"],)).fetchone()["c"]
+                if left == 0:
+                    self.toggle_complete(t["parent_id"], True)
+        # 反向联动: 取消子任务完成时, 若父任务已完成则重新打开
+        if t and t["parent_id"] and not completed:
+            parent = self.get_task(t["parent_id"])
+            if parent and parent["completed"]:
+                self.update_task(t["parent_id"], completed=0, completed_at=None)
+
+    def toggle_star(self, task_id, starred):
+        self.update_task(task_id, starred=int(starred))
+
+    def delete_task(self, task_id):
+        self.conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+        self.conn.commit()
+
+    def move_task(self, task_id, list_id):
+        self.update_task(task_id, list_id=list_id)
+        t = self.get_task(task_id)
+        if t and not t["parent_id"]:
+            self.conn.execute("UPDATE tasks SET list_id=? WHERE parent_id=?",
+                              (list_id, task_id))
+            self.conn.commit()
+
+    def get_task(self, task_id):
+        r = self.conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+        return dict(r) if r else None
+
+    def get_tasks(self, view="all", list_id=None, search="", sort="created",
+                  show_completed=True):
+        """查询顶级任务(含子任务进度). view: all/today/overdue/starred/done;
+        sort: created/due/priority. 今天/逾期/搜索会联动匹配子任务."""
+        where = ["t.parent_id IS NULL"]
+        params = []
+        if view == "today":
+            where.append(
+                "(t.completed=0 AND ("
+                " (t.due_date IS NOT NULL AND date(t.due_date) = ?)"
+                " OR EXISTS(SELECT 1 FROM tasks s WHERE s.parent_id=t.id"
+                "           AND s.completed=0 AND s.due_date IS NOT NULL AND date(s.due_date) = ?)))")
+            params.extend([date.today().isoformat(), date.today().isoformat()])
+        elif view == "overdue":
+            where.append(
+                "(t.completed=0 AND ("
+                " (t.due_date IS NOT NULL AND date(t.due_date) < ?)"
+                " OR EXISTS(SELECT 1 FROM tasks s WHERE s.parent_id=t.id"
+                "           AND s.completed=0 AND s.due_date IS NOT NULL AND date(s.due_date) < ?)))")
+            params.extend([date.today().isoformat(), date.today().isoformat()])
+        elif view == "starred":
+            where.append("t.starred=1")
+            if not show_completed:
+                where.append("t.completed=0")
+        elif view == "done":
+            where.append("t.completed=1")
+        elif not show_completed:
+            where.append("t.completed=0")
+        if list_id is not None:
+            where.append("t.list_id=?")
+            params.append(list_id)
+        if search:
+            where.append(
+                "(t.title LIKE ? OR t.notes LIKE ?"
+                " OR EXISTS(SELECT 1 FROM tasks s WHERE s.parent_id=t.id"
+                "           AND (s.title LIKE ? OR s.notes LIKE ?)))")
+            like = f"%{search}%"
+            params.extend([like, like, like, like])
+        order = {
+            "due": "t.completed ASC, (t.due_date IS NULL) ASC, t.due_date ASC, t.priority DESC, t.id DESC",
+            "priority": "t.completed ASC, t.priority DESC, (t.due_date IS NULL) ASC, t.due_date ASC, t.id DESC",
+        }.get(sort, "t.completed ASC, t.starred DESC, t.id DESC")
+        sql = ("SELECT t.*,"
+               " (SELECT COUNT(*) FROM tasks s WHERE s.parent_id=t.id) AS sub_count,"
+               " (SELECT COUNT(*) FROM tasks s WHERE s.parent_id=t.id AND s.completed=1) AS sub_done"
+               " FROM tasks t")
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY " + order
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def get_subtasks_for(self, parent_ids):
+        """批量查询多个父任务的子任务: {parent_id: [subtask, ...]}"""
+        ids = [i for i in parent_ids if i is not None]
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT * FROM tasks WHERE parent_id IN ({marks}) ORDER BY sort_order, id",
+            ids).fetchall()
+        grouped = {}
+        for r in rows:
+            grouped.setdefault(r["parent_id"], []).append(dict(r))
+        return grouped
+
+    # ---------------- stats ----------------
+    def get_due_tasks_between(self, start_iso, end_iso, search="", show_completed=True):
+        """返回 [start, end] 区间内所有带截止日期的任务(含子任务), 用于日历视图"""
+        sql = ("SELECT t.*, l.name AS list_name FROM tasks t "
+               "JOIN lists l ON l.id = t.list_id "
+               "WHERE t.due_date IS NOT NULL AND date(t.due_date) BETWEEN ? AND ?")
+        params = [start_iso, end_iso]
+        if not show_completed:
+            sql += " AND t.completed=0"
+        if search:
+            sql += " AND (t.title LIKE ? OR t.notes LIKE ?)"
+            like = f"%{search}%"
+            params.extend([like, like])
+        sql += " ORDER BY t.due_date ASC, t.priority DESC"
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def get_timeline_tasks(self, search="", show_completed=True):
+        """时间线视图: 全部任务(含子任务)及其时间信息"""
+        sql = ("SELECT t.*, l.name AS list_name FROM tasks t "
+               "JOIN lists l ON l.id = t.list_id "
+               "ORDER BY CASE WHEN t.parent_id IS NULL THEN t.id ELSE t.parent_id END, t.id")
+        params = []
+        conds = []
+        if not show_completed:
+            conds.append("t.completed=0")
+        if search:
+            conds.append("(t.title LIKE ? OR t.notes LIKE ?)")
+            like = f"%{search}%"
+            params = [like, like]
+        if conds:
+            sql = sql.replace("ORDER BY",
+                              "WHERE " + " AND ".join(conds) + " ORDER BY")
+        rows = [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+        subs = {}
+        for t in rows:
+            t["start"] = t["created_at"].split(" ")[0] if t["created_at"] else None
+            t["end"] = None
+            if t["completed"] and t["completed_at"]:
+                t["end"] = t["completed_at"].split(" ")[0]
+            elif t["due_date"]:
+                t["end"] = t["due_date"].split(" ")[0]
+            if t["parent_id"]:
+                subs.setdefault(t["parent_id"], []).append(t)
+        parents = [t for t in rows if not t["parent_id"]]
+        for p in parents:
+            children = subs.get(p["id"], [])
+            p["children"] = children
+            p["sub_count"] = len(children)
+            p["sub_done"] = sum(1 for c in children if c["completed"])
+            if not p["end"] and children:
+                child_ends = [c["end"] or c["due_date"] for c in children if c["end"] or c["due_date"]]
+                if child_ends:
+                    p["end"] = max(child_ends)
+        return parents
+
+    # ---------------- 统计 ----------------
+    def completion_stats(self):
+        """统计面板数据: 近4周完成数 / 平均完成时长 / 优先级分布 (主任务口径)"""
+        from datetime import timedelta
+        today = date.today()
+        weekly = []
+        for i in range(3, -1, -1):
+            ws = today - timedelta(days=today.weekday() + 7 * i)
+            we = ws + timedelta(days=6)
+            c = self.conn.execute(
+                "SELECT COUNT(*) c FROM tasks WHERE completed=1 AND completed_at IS NOT NULL "
+                "AND parent_id IS NULL AND date(completed_at) BETWEEN ? AND ?",
+                (ws.isoformat(), we.isoformat())).fetchone()["c"]
+            weekly.append({"start": ws, "end": we, "count": c})
+        avg_days = self.conn.execute(
+            "SELECT AVG(julianday(completed_at) - julianday(created_at)) a "
+            "FROM tasks WHERE completed=1 AND completed_at IS NOT NULL AND parent_id IS NULL"
+        ).fetchone()["a"]
+        prio = []
+        for pid in (3, 2, 1, 0):
+            c = self.conn.execute(
+                "SELECT COUNT(*) c FROM tasks WHERE priority=? AND parent_id IS NULL",
+                (pid,)).fetchone()["c"]
+            prio.append({"prio": pid, "name": PRIORITY_NAMES[pid], "count": c})
+        return {
+            "weekly": weekly,
+            "avg_days": round(avg_days, 1) if avg_days is not None else None,
+            "priority": prio,
+        }
+
+    def export_data(self):
+        """导出全部数据 (JSON 友好结构)"""
+        return {
+            "exported_at": now_str(),
+            "lists": [dict(r) for r in self.conn.execute("SELECT * FROM lists").fetchall()],
+            "tasks": [dict(r) for r in self.conn.execute(
+                "SELECT t.*, l.name AS list_name FROM tasks t "
+                "JOIN lists l ON l.id=t.list_id ORDER BY t.id").fetchall()],
+        }
+
+    def daily_activity(self, days=371):
+        """近 N 天按天活动量(主任务口径): {date_str: {"completed": n, "created": n}}"""
+        from datetime import timedelta
+        start = (date.today() - timedelta(days=days - 1)).isoformat()
+        out = {}
+        for r in self.conn.execute(
+                "SELECT date(created_at) d, COUNT(*) c FROM tasks"
+                " WHERE parent_id IS NULL AND created_at IS NOT NULL"
+                " AND date(created_at)>=? GROUP BY d", (start,)):
+            out.setdefault(r["d"], {"completed": 0, "created": 0})["created"] = r["c"]
+        for r in self.conn.execute(
+                "SELECT date(completed_at) d, COUNT(*) c FROM tasks"
+                " WHERE parent_id IS NULL AND completed=1 AND completed_at IS NOT NULL"
+                " AND date(completed_at)>=? GROUP BY d", (start,)):
+            out.setdefault(r["d"], {"completed": 0, "created": 0})["completed"] = r["c"]
+        return out
+
+    def stats(self):
+        """底部统计. 口径:
+        - 待办/已完成/星标: 未完成/全部的父任务数(与主列表一致)
+        - 今日到期/逾期: 自身或任一未完成子任务命中(与智能视图卡片数一致)"""
+        today = date.today().isoformat()
+        total = self.conn.execute("SELECT COUNT(*) c FROM tasks WHERE parent_id IS NULL").fetchone()["c"]
+        done = self.conn.execute(
+            "SELECT COUNT(*) c FROM tasks WHERE parent_id IS NULL AND completed=1").fetchone()["c"]
+        today_due = self.conn.execute(
+            "SELECT COUNT(*) c FROM tasks t WHERE t.parent_id IS NULL AND t.completed=0 AND ("
+            " (t.due_date IS NOT NULL AND date(t.due_date)=?)"
+            " OR EXISTS(SELECT 1 FROM tasks s WHERE s.parent_id=t.id AND s.completed=0"
+            "           AND s.due_date IS NOT NULL AND date(s.due_date)=?))",
+            (today, today)).fetchone()["c"]
+        overdue = self.conn.execute(
+            "SELECT COUNT(*) c FROM tasks t WHERE t.parent_id IS NULL AND t.completed=0 AND ("
+            " (t.due_date IS NOT NULL AND date(t.due_date)<?)"
+            " OR EXISTS(SELECT 1 FROM tasks s WHERE s.parent_id=t.id AND s.completed=0"
+            "           AND s.due_date IS NOT NULL AND date(s.due_date)<?))",
+            (today, today)).fetchone()["c"]
+        starred = self.conn.execute(
+            "SELECT COUNT(*) c FROM tasks WHERE parent_id IS NULL AND starred=1").fetchone()["c"]
+        return {"total": total, "done": done, "today_due": today_due,
+                "overdue": overdue, "starred": starred, "pending": total - done}
+
+    def close(self):
+        self.conn.close()
+
+
+def due_label(due_str):
+    """截止日期(可含时间) -> (显示文本, 状态)  状态: overdue/today/future"""
+    if not due_str:
+        return "", ""
+    parts = str(due_str).split(" ")
+    try:
+        d = date.fromisoformat(parts[0])
+    except ValueError:
+        return due_str, "future"
+    time_part = parts[1][:5] if len(parts) > 1 else ""
+    today = date.today()
+    delta = (d - today).days
+    if delta < 0:
+        text = f"逾期 {abs(delta)} 天"
+        status = "overdue"
+    elif delta == 0:
+        text = "今天"
+        status = "today"
+    elif delta == 1:
+        text = "明天"
+        status = "future"
+    elif delta == 2:
+        text = "后天"
+        status = "future"
+    elif delta <= 7:
+        names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        text = names[d.weekday()]
+        status = "future"
+    else:
+        text = d.strftime("%m-%d")
+        status = "future"
+    if time_part and time_part != "00:00":
+        text += f" {time_part}"
+    return text, status
+
+
+def parse_due(due_str):
+    """'YYYY-MM-DD[ HH:MM]' -> (date, time|None); 非法日期返回 (None, None)"""
+    if not due_str:
+        return None, None
+    parts = str(due_str).split(" ")
+    try:
+        d = date.fromisoformat(parts[0])
+    except ValueError:
+        return None, None
+    t = None
+    if len(parts) > 1 and parts[1][:5] != "00:00":
+        try:
+            hh, mm = parts[1][:5].split(":")
+            t = (int(hh), int(mm))
+        except ValueError:
+            t = None
+    return d, t
+
+
+def this_weekday(weekday):
+    """本周指定星期几(周一为一周开始), weekday: 0=周一"""
+    today = date.today()
+    return today + timedelta(days=weekday - today.weekday())
+
+
+def next_workday(weekday):
+    """下个指定星期几的日期, weekday: 0=周一"""
+    today = date.today()
+    for i in range(1, 15):
+        d = today + timedelta(days=i)
+        if d.weekday() == weekday:
+            return d
+    return today
+
+# ------------------------------------------------------------ calendar_widget.py ------------------------------------------------------------
+# -*- coding: utf-8 -*-
+"""自研日历选择组件：月份网格 + 时间精确到分钟"""
+import calendar as cal_mod
+from datetime import date, datetime
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (QCheckBox, QDialog, QGridLayout, QHBoxLayout,
+                               QLabel, QPushButton, QSpinBox, QToolButton,
+                               QVBoxLayout, QWidget)
+
+import styles as st
+
+WEEK_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
+
+
+class DateTimePickerDialog(QDialog):
+    """日历弹窗：选择日期（月份网格自绘）+ 时间（时:分）或全天"""
+
+    def __init__(self, parent=None, value=None):
+        super().__init__(parent)
+        # 不使用 Popup+半透明组合(Windows 下会渲染成黑色)，改为无边框模态对话框
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setObjectName("pickerRoot")
+        self.setStyleSheet(f"""
+            QDialog#pickerRoot {{
+                background: {st.CARD}; border: 1px solid {st.BORDER};
+                border-radius: 12px;
+            }}
+        """)
+
+        # 初始状态
+        if value:
+            d, t = value if isinstance(value, tuple) else (value, None)
+        else:
+            d, t = date.today(), None
+        self.sel_date = d
+        self.view_year, self.view_month = d.year, d.month
+        self.hour = t[0] if t else 9
+        self.minute = t[1] if t else 0
+        self.all_day = t is None
+        self.cleared = False
+
+        self._build()
+        self._render_grid()
+        self._sync_time_ui()
+
+    # ---------- UI ----------
+    def _build(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        # 注意: 不要对 plain QWidget 使用无选择器的 setStyleSheet,
+        # 它会级联覆盖所有子控件的背景(导致按钮透明/变黑)
+        panel = QWidget()
+        v = QVBoxLayout(panel)
+        v.setContentsMargins(16, 14, 16, 14)
+        v.setSpacing(8)
+
+        # 月份导航
+        nav = QHBoxLayout()
+        self.prev_btn = QToolButton()
+        self.prev_btn.setObjectName("navBtn2")
+        self.prev_btn.setText("◀")
+        self.next_btn = QToolButton()
+        self.next_btn.setObjectName("navBtn2")
+        self.next_btn.setText("▶")
+        self.month_label = QLabel()
+        self.month_label.setAlignment(Qt.AlignCenter)
+        self.month_label.setCursor(Qt.PointingHandCursor)
+        self.month_label.setToolTip("点击选择年份和月份")
+        nav.addWidget(self.prev_btn)
+        nav.addStretch()
+        nav.addWidget(self.month_label)
+        nav.addStretch()
+        nav.addWidget(self.next_btn)
+        v.addLayout(nav)
+        self.prev_btn.clicked.connect(lambda: self._on_nav(-1))
+        self.next_btn.clicked.connect(lambda: self._on_nav(1))
+        self.month_label.mouseReleaseEvent = lambda e: self._show_year_month_popup()
+
+        # 星期表头
+        week_row = QGridLayout()
+        week_row.setSpacing(2)
+        for i, name in enumerate(WEEK_NAMES):
+            lab = QLabel(name)
+            lab.setAlignment(Qt.AlignCenter)
+            lab.setObjectName("weekHead")
+            lab.setStyleSheet(f"color: {st.TEXT_FAINT}; font-size: 11px; background: transparent;")
+            week_row.addWidget(lab, 0, i)
+        v.addLayout(week_row)
+
+        # 日期网格
+        self.grid = QGridLayout()
+        self.grid.setSpacing(2)
+        self.day_buttons = []
+        for r in range(6):
+            for c in range(7):
+                btn = QPushButton()
+                btn.setFixedSize(36, 32)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.clicked.connect(lambda _=False, idx=r * 7 + c: self._pick_day(idx))
+                self.grid.addWidget(btn, r, c)
+                self.day_buttons.append(btn)
+        v.addLayout(self.grid)
+
+        # 时间行
+        time_row = QHBoxLayout()
+        time_row.setSpacing(8)
+        self.allday_check = QCheckBox("全天")
+        self.allday_check.setChecked(self.all_day)
+        self.allday_check.toggled.connect(self._on_allday)
+        time_row.addWidget(self.allday_check)
+        time_row.addStretch()
+        self.hour_spin = QSpinBox()
+        self.hour_spin.setRange(0, 23)
+        self.hour_spin.setSuffix(" 时")
+        self.minute_spin = QSpinBox()
+        self.minute_spin.setRange(0, 59)
+        self.minute_spin.setSuffix(" 分")
+        self.colon_label = QLabel(":")
+        for wdg in (self.hour_spin, self.colon_label, self.minute_spin):
+            time_row.addWidget(wdg)
+        self.hour_spin.valueChanged.connect(lambda _: self._on_time_change())
+        self.minute_spin.valueChanged.connect(lambda _: self._on_time_change())
+        v.addLayout(time_row)
+
+        # 底部按钮
+        btns = QHBoxLayout()
+        clear_btn = QPushButton("清除")
+        clear_btn.setObjectName("ghostBtn")
+        clear_btn.clicked.connect(self._on_clear)
+        btns.addWidget(clear_btn)
+        btns.addStretch()
+        today_btn = QPushButton("今天")
+        today_btn.setObjectName("ghostBtn")
+        today_btn.clicked.connect(self._on_today)
+        btns.addWidget(today_btn)
+        ok_btn = QPushButton("确定")
+        ok_btn.setObjectName("primaryBtn")
+        ok_btn.clicked.connect(self.accept)
+        btns.addWidget(ok_btn)
+        v.addLayout(btns)
+
+        outer.addWidget(panel)
+        self._style_day_buttons()
+        self._update_month_label()
+
+    def _style_day_buttons(self):
+        for b in self.day_buttons:
+            b.setStyleSheet(f"""
+                QPushButton {{
+                    color: {st.TEXT}; background: transparent;
+                    border: none; border-radius: 8px; font-size: 13px;
+                }}
+                QPushButton:hover {{ background: {st.PRIMARY_SOFT}; }}
+            """)
+
+    def _update_month_label(self):
+        self.month_label.setText(f"{self.view_year} 年 {self.view_month} 月")
+        self.month_label.setStyleSheet(
+            f"color: {st.TEXT}; font-size: 15px; font-weight: 700; background: transparent;"
+            f"padding: 2px 10px; border-radius: 6px;"
+            f"QLabel:hover {{ background: {st.PRIMARY_SOFT}; }}")
+
+    def _show_year_month_popup(self):
+        """年月选择弹窗: 年份切换 + 12 月网格"""
+        from PySide6.QtWidgets import QDialog, QGridLayout
+        dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.Popup)
+        dlg.setObjectName("ymRoot")
+        dlg.setStyleSheet(f"""
+            QDialog#ymRoot {{ background: {st.CARD}; border: 1px solid {st.BORDER};
+                border-radius: 10px; }}
+        """)
+        v = QVBoxLayout(dlg)
+        v.setContentsMargins(12, 10, 12, 12)
+        v.setSpacing(8)
+
+        # 年份行
+        year_row = QHBoxLayout()
+        y_prev = QToolButton(); y_prev.setObjectName("navBtn2"); y_prev.setText("◀")
+        y_next = QToolButton(); y_next.setObjectName("navBtn2"); y_next.setText("▶")
+        year_label = QLabel(str(self.view_year))
+        year_label.setAlignment(Qt.AlignCenter)
+        year_label.setStyleSheet(
+            f"color: {st.TEXT}; font-size: 15px; font-weight: 700; background: transparent;")
+        state = {"year": self.view_year}
+
+        def refresh_year():
+            year_label.setText(str(state["year"]))
+            for i, b in enumerate(month_btns):
+                b.setText(f"{i + 1}月")
+                is_cur = (state["year"] == self.view_year and i + 1 == self.view_month)
+                b.setStyleSheet(
+                    f"QPushButton {{ color: {'#FFFFFF' if is_cur else st.TEXT};"
+                    f" background: {st.PRIMARY if is_cur else 'transparent'};"
+                    f" border: none; border-radius: 8px; padding: 8px 0; font-size: 13px; }}"
+                    f"QPushButton:hover {{ background: {st.PRIMARY_SOFT if not is_cur else st.PRIMARY_HOVER}; }}")
+
+        y_prev.clicked.connect(lambda: (state.update(year=state["year"] - 1), refresh_year()))
+        y_next.clicked.connect(lambda: (state.update(year=state["year"] + 1), refresh_year()))
+        year_row.addWidget(y_prev)
+        year_row.addStretch()
+        year_row.addWidget(year_label)
+        year_row.addStretch()
+        year_row.addWidget(y_next)
+        v.addLayout(year_row)
+
+        # 12 月网格
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        month_btns = []
+        for i in range(12):
+            b = QPushButton(f"{i + 1}月")
+            b.setFixedHeight(34)
+            b.setCursor(Qt.PointingHandCursor)
+            def make_pick(m):
+                def pick():
+                    self.view_year = state["year"]
+                    self.view_month = m
+                    dlg.accept()
+                return pick
+            b.clicked.connect(make_pick(i + 1))
+            grid.addWidget(b, i // 4, i % 4)
+            month_btns.append(b)
+        v.addLayout(grid)
+        refresh_year()
+
+        dlg.adjustSize()
+        pos = self.month_label.mapToGlobal(self.month_label.rect().center())
+        dlg.move(pos.x() - dlg.width() // 2, pos.y() - dlg.height() // 2)
+        if dlg.exec() == QDialog.Accepted:
+            self._update_month_label()
+            self._render_grid()
+
+    # ---------- 渲染 ----------
+    def _render_grid(self):
+        year, month = self.view_year, self.view_month
+        first = date(year, month, 1)
+        # 周一为第一列
+        lead = first.weekday()  # 0=周一
+        days_in_month = cal_mod.monthrange(year, month)[1]
+        prev_year, prev_month = (year - 1, 12) if month == 1 else (year, month - 1)
+        prev_days = cal_mod.monthrange(prev_year, prev_month)[1]
+        today = date.today()
+        self.cell_dates = []
+        for i in range(42):
+            day_num = i - lead + 1
+            if day_num < 1:
+                d = date(prev_year, prev_month, prev_days + day_num)
+                in_month = False
+            elif day_num > days_in_month:
+                d = date(year, month, day_num - days_in_month)
+                in_month = False
+            else:
+                d = date(year, month, day_num)
+                in_month = True
+            self.cell_dates.append(d)
+            btn = self.day_buttons[i]
+            btn.setText(str(d.day))
+            selected = (d == self.sel_date)
+            is_today = (d == today)
+            if selected:
+                style = f"""
+                    QPushButton {{ color: #FFFFFF; background: {st.PRIMARY};
+                        border: none; border-radius: 8px; font-size: 13px; font-weight: 700; }}
+                    QPushButton:hover {{ background: {st.PRIMARY_HOVER}; }}
+                """
+            elif is_today:
+                style = f"""
+                    QPushButton {{ color: {st.PRIMARY}; background: {st.PRIMARY_SOFT};
+                        border: 1px solid {st.PRIMARY}; border-radius: 8px;
+                        font-size: 13px; font-weight: 700; }}
+                    QPushButton:hover {{ background: #D8E7FD; }}
+                """
+            elif not in_month:
+                style = f"""
+                    QPushButton {{ color: {st.TEXT_FAINT}; background: transparent;
+                        border: none; border-radius: 8px; font-size: 13px; }}
+                    QPushButton:hover {{ background: {st.PRIMARY_SOFT}; }}
+                """
+            else:
+                style = f"""
+                    QPushButton {{ color: {st.TEXT}; background: transparent;
+                        border: none; border-radius: 8px; font-size: 13px; }}
+                    QPushButton:hover {{ background: {st.PRIMARY_SOFT}; }}
+                """
+            btn.setStyleSheet(style)
+
+    # ---------- 交互 ----------
+    def _pick_day(self, idx):
+        self.sel_date = self.cell_dates[idx]
+        self.cleared = False
+        self._render_grid()
+
+    def _on_nav(self, delta):
+        m = self.view_month + delta
+        if m < 1:
+            self.view_year, self.view_month = self.view_year - 1, 12
+        elif m > 12:
+            self.view_year, self.view_month = self.view_year + 1, 1
+        else:
+            self.view_month = m
+        self._update_month_label()
+        self._render_grid()
+
+    def _on_allday(self, checked):
+        self.all_day = checked
+        self._sync_time_ui()
+
+    def _sync_time_ui(self):
+        for w in (self.hour_spin, self.minute_spin, self.colon_label):
+            w.setEnabled(not self.all_day)
+            w.setVisible(not self.all_day)
+        self.hour_spin.setValue(self.hour)
+        self.minute_spin.setValue(self.minute)
+
+    def _on_time_change(self):
+        self.hour = self.hour_spin.value()
+        self.minute = self.minute_spin.value()
+
+    def _on_clear(self):
+        self.cleared = True
+        self.reject()
+
+    def _on_today(self):
+        self.sel_date = date.today()
+        self.view_year, self.view_month = self.sel_date.year, self.sel_date.month
+        self._update_month_label()
+        self._render_grid()
+
+    # ---------- 结果 ----------
+    def get_result(self):
+        """None=清除; 否则 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM'"""
+        if self.cleared:
+            return None
+        if self.all_day:
+            return self.sel_date.isoformat()
+        return f"{self.sel_date.isoformat()} {self.hour:02d}:{self.minute:02d}"
+
+    # ---------- 定位 ----------
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.adjustSize()
+
+    def popup_for(self, anchor):
+        """在 anchor 按钮(全局坐标)下方弹出"""
+        self.adjustSize()
+        pos = anchor.mapToGlobal(anchor.rect().bottomLeft())
+        screen = self.screen() or self.window().windowHandle().screen()
+        if screen:
+            geo = screen.availableGeometry()
+            x = min(max(pos.x(), geo.left() + 8), geo.right() - self.width() - 8)
+            y = pos.y() + 6
+            if y + self.height() > geo.bottom():
+                y = max(geo.top() + 8, pos.y() - self.height() - 6)
+            self.move(x, y)
+        return self.exec()
+
